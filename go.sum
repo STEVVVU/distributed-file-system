@@ -718,8 +718,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/inhies/go-bytesize v0.0.0-20220417184213-4913239db9cf h1:FtEj8sfIcaaBfAKrE1Cwb61YDtYq9JxChK1c7AKce7s=
 github.com/inhies/go-bytesize v0.0.0-20220417184213-4913239db9cf/go.mod h1:yrqSXGoD/4EKfF26AOGzscPOgTTJcyAwM2rpixWT+t4=
-github.com/internxt/rclone-adapter v0.0.0-20260708165336-dd6561bacfa2 h1:ZeebPK9Bnpy40uTuneEeVMYaMMerol3qsmIvzD0EIAk=
-github.com/internxt/rclone-adapter v0.0.0-20260708165336-dd6561bacfa2/go.mod h1:4jGLEnNHyWOVSGn89IeWUVqlKCEitOM3D32/XypGy/o=
+github.com/internxt/rclone-adapter v0.0.0-20260904121407-404a75f3d031 h1:l0apMNjUmo3E9wtiveXKkBL1gpvWb7OUawnn9ZsOS2I=
+github.com/internxt/rclone-adapter v0.0.0-20260904121407-404a75f3d031/go.mod h1:4jGLEnNHyWOVSGn89IeWUVqlKCEitOM3D32/XypGy/o=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
@@ -1057,8 +1057,8 @@ github.com/rclone/Proton-API-Bridge v1.0.5 h1:K1++Qtk3PvgkiCCiv6Pahju1TMOzKY6VSw
 github.com/rclone/Proton-API-Bridge v1.0.5/go.mod h1:vCeOPhlXzevN0AFojgh1zsjhetiShy/ArvJ/xkFUDWk=
 github.com/rclone/go-proton-api v1.0.4 h1:AJW0e9pB4j0hVK4WqyGErFwaI+5MUQWPCtj5FYYxtPg=
 github.com/rclone/go-proton-api v1.0.4/go.mod h1:QAlkFfswzrBuxvCORWV8rZdddg52hahMN98CFWoFW1E=
-github.com/rclone/rclone v1.75.1 h1:kIxQcoDLj2Gke/gMSHK7OnxhX1Gu1cJBLP1kJZoaFp0=
-github.com/rclone/rclone v1.75.1/go.mod h1:4zmMjGatCkSJPRZDpo+7y3xOl8S29EMUyKvZop5mHr4=
+github.com/rclone/rclone v1.75.2 h1:0cqa6P3WmhGnu2NeOdZSetJnacpwCRtpsNbHOICqPk8=
+github.com/rclone/rclone v1.75.2/go.mod h1:YmKNkhnFIoIwLsEZl7FSN756Iq5ZXy3LPDuypnuFocA=
 github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 h1:N/ElC8H3+5XpJzTSTfLsJV/mx9Q9g7kxmchpfZyxgzM=
 github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475/go.mod h1:bCqnVzQkZxMG4s8nGwiZ5l3QUCyqpo9Y+/ZMZ9VjZe4=
 github.com/rdleal/intervalst v1.5.0 h1:SEB9bCFz5IqD1yhfH1Wv8IBnY/JQxDplwkxHjT6hamU=
