@@ -13,7 +13,7 @@ The driver checks every owned process remains alive, records `/cluster/status`, 
 
 ## Drive
 
-`python coursework/verify.py --run baseline --scenario baseline` drives the mapped HTTP file journey. `python coursework/verify.py --run recovery` adds permanent replica loss, master/filer restart, a guard-rejected explicit repair attempt, retained-volume restart, and bounded unavailable reads/writes. `python coursework/verify.py --run deliberate-failure --fail` must exit 1 with `passed:false` and `cleanup:true`. This is a real failure-path check, not a successful feature proof.
+`python coursework/verify.py --run baseline --scenario baseline` drives the mapped HTTP file journey. `python coursework/verify.py --run recovery` adds permanent replica loss, master/filer restart, a guard-rejected explicit repair attempt, retained-volume restart, and bounded unavailable reads/writes. `python coursework/verify.py --run deliberate-failure --port 19400 --fail` must exit 1 with `passed:false` and `cleanup:true`. This is a real failure-path check, not a successful feature proof.
 
 ## Evidence
 

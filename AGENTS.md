@@ -15,7 +15,7 @@ go test ./weed/shell -run 'Test.*(Replica|Replication)' -count=1
 go test ./weed/server -run 'Test.*(ReplicaTarget|RemoteEndpoint|BlockedIP|VolumeCopy)' -count=1
 python -m unittest discover -s coursework -p test_verify.py -v
 python coursework/verify.py --run fresh-name
-python coursework/verify.py --run fresh-failure-name --fail
+python coursework/verify.py --run fresh-failure-name --port 19400 --fail
 ```
 
 Use [.agents/skills/verify-distributed-file-system/SKILL.md](.agents/skills/verify-distributed-file-system/SKILL.md) and its feature map for Launch, Doctor, Drive, Evidence and Cleanup. Intentional failure must exit 1 with `passed:false`, `cleanup:true` and the deliberate error. Never invoke Python with `-O`; assertions are verification oracles.
