@@ -25,4 +25,6 @@ The driver stops only subprocess handles it created in `finally`, retains owners
 
 ## Helpers
 
+`coursework/benchmark.py` reuses Workbench for the [frozen benchmark path](features/benchmark.md), with `coursework/benchmark_support.py` for scheduled load/resource receipts. Start with smoke before isolated Linux benchmark or separate profile mode. It retains the existing endpoint guards, owned cleanup and containment policy.
+
 The maintained driver is `coursework/verify.py`, using only Python's standard library and public HTTP/CLI APIs. See [feature map](features/README.md).
