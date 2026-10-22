@@ -1,0 +1,767 @@
+{
+  "campaign": "P09-full-39739708895",
+  "workflow_run_url": "https://github.com/STEVVVU/distributed-file-system/actions/runs/39739708895",
+  "source_sha": "3044ff1dbc72cb606eb39f07509ec0dffe1babf7",
+  "repository_dirty": false,
+  "environment": {
+    "source": "3044ff1dbc72cb606eb39f07509ec0dffe1babf7",
+    "dirty": false,
+    "python": "3.12.3",
+    "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+    "cores": 4,
+    "clock_ticks": 100
+  },
+  "raw_summary": {
+    "relative_path": "benchmark-benchmark-1792653673243642588/summary.json",
+    "sha256": "73590ebd63bdb066eac551932894a8cb9b2811d854cb1e2962e14eb88ed52176",
+    "bytes": 7320596
+  },
+  "reproduction_command": "python3 coursework/benchmark.py benchmark",
+  "workload": {
+    "version": 2,
+    "seed": 421,
+    "sizes": [
+      4096,
+      1048576,
+      16777216
+    ],
+    "concurrency": [
+      1,
+      4,
+      16
+    ],
+    "operations": [
+      "put",
+      "get",
+      "metadata"
+    ],
+    "repeats": 5,
+    "count": 16,
+    "large_count": 4,
+    "rates": [
+      5,
+      20,
+      80
+    ],
+    "sweep_seconds": 10,
+    "stability_seconds": 120,
+    "storage_phase": "after all owned writers stop, before guarded deletion"
+  },
+  "audit": {
+    "trials": 140,
+    "passing_trials": 140,
+    "per_trial_receipts_matched": 140,
+    "samples": 12271,
+    "outcomes": {
+      "offered": 12271,
+      "finished": 12271,
+      "failed": 0,
+      "rejected": 0,
+      "timed_out": 0,
+      "generator_declined": 0
+    },
+    "put_ack_samples": 540,
+    "verified_full_readbacks_after_timing": 540,
+    "get_sha256_sample_proofs": 11191,
+    "metadata_stat_listing_samples": 540,
+    "range_oracle_trials": 140,
+    "note": "Range response bytes are not retained. The pinned benchmark source asserts HTTP 206 and exact requested bytes on each passing trial.",
+    "cleanup_receipts_passed": 140,
+    "storage_snapshots": 140,
+    "storage_apparent_bytes_range": [
+      16151,
+      167796824
+    ],
+    "storage_allocated_bytes_range": [
+      270336,
+      168091648
+    ]
+  },
+  "rate_runs": [
+    {
+      "offered_per_second": 5,
+      "offered": 50,
+      "finished": 50,
+      "failed": 0,
+      "rejected": 0,
+      "timed_out": 0,
+      "generator_declined": 0,
+      "transaction_latency_ms": {
+        "p50": 5.027331,
+        "p95": 5.54833,
+        "p99": 5.632808
+      },
+      "dispatch_lag_ms": {
+        "p50": 0.247373,
+        "p95": 0.282952,
+        "p99": 0.296808
+      },
+      "duration_seconds": 9.805
+    },
+    {
+      "offered_per_second": 20,
+      "offered": 200,
+      "finished": 200,
+      "failed": 0,
+      "rejected": 0,
+      "timed_out": 0,
+      "generator_declined": 0,
+      "transaction_latency_ms": {
+        "p50": 5.118496,
+        "p95": 5.410524,
+        "p99": 6.057171
+      },
+      "dispatch_lag_ms": {
+        "p50": 0.190682,
+        "p95": 0.245305,
+        "p99": 0.261061
+      },
+      "duration_seconds": 9.955
+    },
+    {
+      "offered_per_second": 80,
+      "offered": 800,
+      "finished": 800,
+      "failed": 0,
+      "rejected": 0,
+      "timed_out": 0,
+      "generator_declined": 0,
+      "transaction_latency_ms": {
+        "p50": 4.875868,
+        "p95": 5.256322,
+        "p99": 5.759383
+      },
+      "dispatch_lag_ms": {
+        "p50": 0.15397,
+        "p95": 0.174393,
+        "p99": 0.190078
+      },
+      "duration_seconds": 9.992
+    },
+    {
+      "offered_per_second": 80,
+      "offered": 9600,
+      "finished": 9600,
+      "failed": 0,
+      "rejected": 0,
+      "timed_out": 0,
+      "generator_declined": 0,
+      "transaction_latency_ms": {
+        "p50": 4.942307,
+        "p95": 5.294597,
+        "p99": 5.689688
+      },
+      "dispatch_lag_ms": {
+        "p50": 0.159549,
+        "p95": 0.179365,
+        "p99": 0.204087
+      },
+      "duration_seconds": 119.993
+    }
+  ],
+  "stability": {
+    "offered_per_second": 80,
+    "offered": 9600,
+    "finished": 9600,
+    "failed": 0,
+    "rejected": 0,
+    "timed_out": 0,
+    "generator_declined": 0,
+    "transaction_latency_ms": {
+      "p50": 4.942307,
+      "p95": 5.294597,
+      "p99": 5.689688
+    },
+    "dispatch_lag_ms": {
+      "p50": 0.159549,
+      "p95": 0.179365,
+      "p99": 0.204087
+    },
+    "duration_seconds": 119.993
+  },
+  "recovery": {
+    "payload_bytes": 2097152,
+    "journey_seconds": 92.935142,
+    "repair": {
+      "proved": false,
+      "status": "blocked",
+      "reason": "upstream replica endpoint guard rejects loopback"
+    }
+  },
+  "five_repeat_cells": [
+    {
+      "size_bytes": 4096,
+      "concurrency_setting": 1,
+      "operation": "get",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 6.727,
+        "range_ms": [
+          6.569,
+          8.205
+        ]
+      },
+      "p99": {
+        "median_ms": 13.101,
+        "range_ms": [
+          12.813,
+          14.405
+        ]
+      }
+    },
+    {
+      "size_bytes": 4096,
+      "concurrency_setting": 1,
+      "operation": "metadata",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 8.084,
+        "range_ms": [
+          7.936,
+          8.889
+        ]
+      },
+      "p99": {
+        "median_ms": 15.606,
+        "range_ms": [
+          15.279,
+          16.753
+        ]
+      }
+    },
+    {
+      "size_bytes": 4096,
+      "concurrency_setting": 1,
+      "operation": "put",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 19.262,
+        "range_ms": [
+          17.183,
+          22.888
+        ]
+      },
+      "p99": {
+        "median_ms": 35.018,
+        "range_ms": [
+          33.161,
+          41.927
+        ]
+      }
+    },
+    {
+      "size_bytes": 4096,
+      "concurrency_setting": 4,
+      "operation": "get",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 4.578,
+        "range_ms": [
+          4.337,
+          6.334
+        ]
+      },
+      "p99": {
+        "median_ms": 8.582,
+        "range_ms": [
+          7.6,
+          10.777
+        ]
+      }
+    },
+    {
+      "size_bytes": 4096,
+      "concurrency_setting": 4,
+      "operation": "metadata",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 7.651,
+        "range_ms": [
+          7.197,
+          8.405
+        ]
+      },
+      "p99": {
+        "median_ms": 13.03,
+        "range_ms": [
+          12.621,
+          13.793
+        ]
+      }
+    },
+    {
+      "size_bytes": 4096,
+      "concurrency_setting": 4,
+      "operation": "put",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 9.462,
+        "range_ms": [
+          9.011,
+          12.668
+        ]
+      },
+      "p99": {
+        "median_ms": 16.263,
+        "range_ms": [
+          15.864,
+          19.316
+        ]
+      }
+    },
+    {
+      "size_bytes": 4096,
+      "concurrency_setting": 16,
+      "operation": "get",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 4.349,
+        "range_ms": [
+          4.103,
+          5.606
+        ]
+      },
+      "p99": {
+        "median_ms": 6.666,
+        "range_ms": [
+          5.682,
+          12.281
+        ]
+      }
+    },
+    {
+      "size_bytes": 4096,
+      "concurrency_setting": 16,
+      "operation": "metadata",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 7.328,
+        "range_ms": [
+          6.729,
+          8.078
+        ]
+      },
+      "p99": {
+        "median_ms": 11.353,
+        "range_ms": [
+          11.186,
+          13.456
+        ]
+      }
+    },
+    {
+      "size_bytes": 4096,
+      "concurrency_setting": 16,
+      "operation": "put",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 9.051,
+        "range_ms": [
+          7.138,
+          12.712
+        ]
+      },
+      "p99": {
+        "median_ms": 15.274,
+        "range_ms": [
+          11.799,
+          17.533
+        ]
+      }
+    },
+    {
+      "size_bytes": 1048576,
+      "concurrency_setting": 1,
+      "operation": "get",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 20.359,
+        "range_ms": [
+          20.193,
+          21.115
+        ]
+      },
+      "p99": {
+        "median_ms": 37.8,
+        "range_ms": [
+          36.303,
+          39.221
+        ]
+      }
+    },
+    {
+      "size_bytes": 1048576,
+      "concurrency_setting": 1,
+      "operation": "metadata",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 8.079,
+        "range_ms": [
+          7.688,
+          8.51
+        ]
+      },
+      "p99": {
+        "median_ms": 15.825,
+        "range_ms": [
+          14.775,
+          16.017
+        ]
+      }
+    },
+    {
+      "size_bytes": 1048576,
+      "concurrency_setting": 1,
+      "operation": "put",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 109.617,
+        "range_ms": [
+          105.592,
+          113.367
+        ]
+      },
+      "p99": {
+        "median_ms": 207.826,
+        "range_ms": [
+          198.837,
+          214.512
+        ]
+      }
+    },
+    {
+      "size_bytes": 1048576,
+      "concurrency_setting": 4,
+      "operation": "get",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 12.19,
+        "range_ms": [
+          9.299,
+          13.63
+        ]
+      },
+      "p99": {
+        "median_ms": 20.354,
+        "range_ms": [
+          18.396,
+          20.464
+        ]
+      }
+    },
+    {
+      "size_bytes": 1048576,
+      "concurrency_setting": 4,
+      "operation": "metadata",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 7.829,
+        "range_ms": [
+          7.152,
+          8.672
+        ]
+      },
+      "p99": {
+        "median_ms": 13.51,
+        "range_ms": [
+          12.778,
+          14.014
+        ]
+      }
+    },
+    {
+      "size_bytes": 1048576,
+      "concurrency_setting": 4,
+      "operation": "put",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 55.297,
+        "range_ms": [
+          50.031,
+          68.425
+        ]
+      },
+      "p99": {
+        "median_ms": 94.048,
+        "range_ms": [
+          91.294,
+          104.433
+        ]
+      }
+    },
+    {
+      "size_bytes": 1048576,
+      "concurrency_setting": 16,
+      "operation": "get",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 13.597,
+        "range_ms": [
+          13.08,
+          18.732
+        ]
+      },
+      "p99": {
+        "median_ms": 23.058,
+        "range_ms": [
+          21.527,
+          25.306
+        ]
+      }
+    },
+    {
+      "size_bytes": 1048576,
+      "concurrency_setting": 16,
+      "operation": "metadata",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 8.691,
+        "range_ms": [
+          7.933,
+          9.552
+        ]
+      },
+      "p99": {
+        "median_ms": 12.113,
+        "range_ms": [
+          11.141,
+          15.129
+        ]
+      }
+    },
+    {
+      "size_bytes": 1048576,
+      "concurrency_setting": 16,
+      "operation": "put",
+      "repeats": 5,
+      "sample_count_per_run": 16,
+      "p50": {
+        "median_ms": 88.258,
+        "range_ms": [
+          78.271,
+          95.686
+        ]
+      },
+      "p99": {
+        "median_ms": 101.209,
+        "range_ms": [
+          98.228,
+          108.729
+        ]
+      }
+    },
+    {
+      "size_bytes": 16777216,
+      "concurrency_setting": 1,
+      "operation": "get",
+      "repeats": 5,
+      "sample_count_per_run": 4,
+      "p50": {
+        "median_ms": 67.809,
+        "range_ms": [
+          66.386,
+          68.691
+        ]
+      },
+      "p99": {
+        "median_ms": 134.887,
+        "range_ms": [
+          133.942,
+          136.729
+        ]
+      }
+    },
+    {
+      "size_bytes": 16777216,
+      "concurrency_setting": 1,
+      "operation": "metadata",
+      "repeats": 5,
+      "sample_count_per_run": 4,
+      "p50": {
+        "median_ms": 2.899,
+        "range_ms": [
+          2.829,
+          3.094
+        ]
+      },
+      "p99": {
+        "median_ms": 5.115,
+        "range_ms": [
+          4.98,
+          5.494
+        ]
+      }
+    },
+    {
+      "size_bytes": 16777216,
+      "concurrency_setting": 1,
+      "operation": "put",
+      "repeats": 5,
+      "sample_count_per_run": 4,
+      "p50": {
+        "median_ms": 156.196,
+        "range_ms": [
+          151.812,
+          164.006
+        ]
+      },
+      "p99": {
+        "median_ms": 302.96,
+        "range_ms": [
+          299.762,
+          316.449
+        ]
+      }
+    },
+    {
+      "size_bytes": 16777216,
+      "concurrency_setting": 4,
+      "operation": "get",
+      "repeats": 5,
+      "sample_count_per_run": 4,
+      "p50": {
+        "median_ms": 76.055,
+        "range_ms": [
+          68.201,
+          77.984
+        ]
+      },
+      "p99": {
+        "median_ms": 88.206,
+        "range_ms": [
+          84.775,
+          100.429
+        ]
+      }
+    },
+    {
+      "size_bytes": 16777216,
+      "concurrency_setting": 4,
+      "operation": "metadata",
+      "repeats": 5,
+      "sample_count_per_run": 4,
+      "p50": {
+        "median_ms": 3.927,
+        "range_ms": [
+          3.626,
+          4.213
+        ]
+      },
+      "p99": {
+        "median_ms": 4.624,
+        "range_ms": [
+          4.573,
+          4.803
+        ]
+      }
+    },
+    {
+      "size_bytes": 16777216,
+      "concurrency_setting": 4,
+      "operation": "put",
+      "repeats": 5,
+      "sample_count_per_run": 4,
+      "p50": {
+        "median_ms": 270.509,
+        "range_ms": [
+          256.228,
+          286.423
+        ]
+      },
+      "p99": {
+        "median_ms": 276.004,
+        "range_ms": [
+          259.198,
+          295.724
+        ]
+      }
+    },
+    {
+      "size_bytes": 16777216,
+      "concurrency_setting": 16,
+      "operation": "get",
+      "repeats": 5,
+      "sample_count_per_run": 4,
+      "p50": {
+        "median_ms": 78.04,
+        "range_ms": [
+          69.439,
+          83.082
+        ]
+      },
+      "p99": {
+        "median_ms": 88.94,
+        "range_ms": [
+          87.612,
+          91.526
+        ]
+      }
+    },
+    {
+      "size_bytes": 16777216,
+      "concurrency_setting": 16,
+      "operation": "metadata",
+      "repeats": 5,
+      "sample_count_per_run": 4,
+      "p50": {
+        "median_ms": 3.764,
+        "range_ms": [
+          3.506,
+          4.457
+        ]
+      },
+      "p99": {
+        "median_ms": 4.886,
+        "range_ms": [
+          4.588,
+          5.02
+        ]
+      }
+    },
+    {
+      "size_bytes": 16777216,
+      "concurrency_setting": 16,
+      "operation": "put",
+      "repeats": 5,
+      "sample_count_per_run": 4,
+      "p50": {
+        "median_ms": 263.719,
+        "range_ms": [
+          237.564,
+          279.193
+        ]
+      },
+      "p99": {
+        "median_ms": 277.508,
+        "range_ms": [
+          269.031,
+          283.673
+        ]
+      }
+    }
+  ],
+  "limits": [
+    "GET is warm-cache and its measured interval includes full-read SHA-256 verification.",
+    "16 MiB cells offer 4 samples per repetition. A concurrency setting of 16 does not create 16 simultaneous requests, and p99 from 4 samples is not a tail-confidence estimate.",
+    "The 80/s run did not reach saturation. The <100 ms dispatch-p99 and <5 s transaction-p99 values are engineering screening thresholds, not a production SLA.",
+    "One hosted four-core Linux runner; CPU model and RAM were not recorded. No disk ceiling, multi-host behavior, or 225 MB/s claim was tested.",
+    "The 92.935 s recovery figure covers the whole fault/restart journey. Repair remained blocked by the upstream loopback endpoint guard."
+  ]
+}
