@@ -8,6 +8,7 @@ from pathlib import Path
 import secrets
 import shutil
 import socket
+import stat
 import sys
 import time
 import urllib.error
@@ -15,7 +16,7 @@ import urllib.error
 from benchmark_support import Run, environment, load, save
 from verify import ROOT, Workbench
 
-WORKLOAD=dict(version=1,seed=421,sizes=[4096,1048576,16777216],concurrency=[1,4,16],operations=['put','get','metadata'],repeats=5,count=16,large_count=4,rates=[5,20,80],sweep_seconds=10,stability_seconds=120)
+WORKLOAD=dict(version=2,seed=421,sizes=[4096,1048576,16777216],concurrency=[1,4,16],operations=['put','get','metadata'],repeats=5,count=16,large_count=4,rates=[5,20,80],sweep_seconds=10,stability_seconds=120,storage_phase='after all owned writers stop, before guarded deletion')
 
 
 def payload(size):
@@ -38,6 +39,15 @@ def baseport():
 
 
 class Bench(Workbench):
+    def before_remove_data(self,target):
+        if target!=self.owned_data or not hasattr(self,'storage_live_payload_bytes'):
+            return
+        assert not self.processes,'storage snapshot requires every owned writer to be reaped'
+        entries=[file.lstat() for file in target.rglob('*')]
+        files=[entry for entry in entries if stat.S_ISREG(entry.st_mode)]
+        self.storage=dict(apparent_bytes=sum(entry.st_size for entry in files),allocated_bytes=sum(getattr(entry,'st_blocks',0)*512 for entry in files) if os.name!='nt' else None,live_payload_bytes=self.storage_live_payload_bytes)
+        self.storage['scope']='Whole owned master/filer/volume regular-file tree after every owned process is reaped, before guarded deletion. Includes indexes, replication and retained deleted needles; Linux allocated blocks only. This differs from version-1 live-tree sampling.'
+
     def start(self,name,arguments):
         if self.args.profile and (name=='master' or name.startswith('volume-')):
             arguments=[*arguments,f'-cpuprofile={self.out.resolve()/ (name+".pprof")}']
@@ -96,20 +106,20 @@ def trial(cell,count,rate=None,recovery=False,profile=False):
         status,actual,_=bench.request(bench.filer,warm,headers={'Range':f'bytes={start}-{end}'})
         assert status==206 and actual==data[start:end+1],'range oracle failed'
         metadata=json.loads(bench.request(bench.filer,warm+'?metadata=true')[1]);result['manifest']=metadata
-        files=[file for file in bench.data.rglob('*') if file.is_file()]
-        result['storage']=dict(apparent_bytes=sum(file.stat().st_size for file in files),allocated_bytes=sum(getattr(file.stat(),'st_blocks',0)*512 for file in files) if os.name!='nt' else None,live_payload_bytes=len(data)*(1+(result['load']['finished'] if cell['operation']=='put' else 0)))
-        result['storage']['scope']='Whole owned master/filer/volume data tree including indexes, replication and retained deleted needles, before cleanup; filesystem allocated blocks on Linux only.'
+        bench.storage_live_payload_bytes=len(data)*(1+(result['load']['finished'] if cell['operation']=='put' else 0))
         if recovery:
             chunks=metadata.get('chunks',[]);assert len(chunks)>1
             result['recovery_start']=time.perf_counter();bench.recovery(warm,data,chunks);result['recovery_end']=time.perf_counter()
             result['repair']=bench.result['repair']
         completed=result['load']['finished']==count
-    except Exception as error:result['error']=repr(error)
+    except Exception as error:result.update(error=repr(error),error_detail=str(error))
     finally:
         bench.finish(completed)
+        if hasattr(bench,'storage'):result['storage']=bench.storage
         sampler.processes=[]
         result['sampler_cleanup']=sampler.cleanup()
         result['cleanup']=bench.result['cleanup']
+        result['cleanup_errors']=bench.result.get('cleanup_errors',[])
         result['passed']=completed and result['cleanup'] and result['sampler_cleanup']['sampler_stopped']
         if profile:
             result['profiles']=[file.name for file in bench.out.glob('*.pprof') if file.stat().st_size]

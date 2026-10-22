@@ -91,7 +91,12 @@ class Workbench:
             raise ValueError("owned data directory moved outside its fresh run")
         if resolved != expected and not resolved.is_relative_to(expected):
             raise ValueError("recursive-delete target is outside owned data")
+        self.before_remove_data(resolved)
         shutil.rmtree(resolved)
+
+    def before_remove_data(self, target):
+        """Optional evidence capture after containment validation, before deletion."""
+        pass
 
     def start_master(self):
         self.start("master", ["master", "-ip=127.0.0.1", "-ip.bind=127.0.0.1",

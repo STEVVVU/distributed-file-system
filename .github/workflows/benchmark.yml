@@ -12,7 +12,9 @@ permissions:
 jobs:
   measure:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # Retained real trials take about 55 s: 135 cells alone need about 124 min.
+    # Include smoke, build, offered-rate/stability/recovery work and artifact upload.
+    timeout-minutes: 210
     env:
       CGO_ENABLED: '0'
       GOTOOLCHAIN: local

@@ -74,6 +74,16 @@ class CleanupTests(unittest.TestCase):
         self.assertFalse(workbench.saved[-1]["cleanup"])
         self.assertIn("injected data cleanup failure", " ".join(workbench.result["cleanup_errors"]))
 
+    def test_evidence_capture_failure_retains_data_and_failing_verdict(self):
+        workbench = self.workbench({"volume": Process()})
+        workbench.before_remove_data = unittest.mock.Mock(side_effect=OSError("snapshot failed"))
+        with patch.object(verify.shutil, "rmtree") as remove:
+            workbench.finish(True)
+        remove.assert_not_called()
+        self.assertFalse(workbench.result["passed"])
+        self.assertFalse(workbench.result["cleanup"])
+        self.assertIn("snapshot failed", " ".join(workbench.result["cleanup_errors"]))
+
     def test_log_failure_does_not_skip_other_logs_or_data(self):
         workbench = self.workbench()
         class BrokenLog:
@@ -97,6 +107,7 @@ class CleanupTests(unittest.TestCase):
 
     def test_recursive_delete_rejects_outside_and_changed_root(self):
         workbench = self.workbench()
+        workbench.before_remove_data = before_remove = unittest.mock.Mock()
         outside = verify.ROOT.resolve() / "outside-owned-data"
         with patch.object(verify.shutil, "rmtree") as remove:
             with self.assertRaises(ValueError):
@@ -105,6 +116,7 @@ class CleanupTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 workbench.remove_data(outside)
         remove.assert_not_called()
+        before_remove.assert_not_called()
 
     def test_resolved_replica_link_cannot_escape_owned_data(self):
         workbench = self.workbench()
