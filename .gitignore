@@ -143,4 +143,5 @@ test/s3/iam/.test_env
 weed_bin
 telemetry/server/telemetry-server
 .aider*
+/.local/
 /seaweed-volume/docs

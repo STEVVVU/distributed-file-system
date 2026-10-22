@@ -238,6 +238,7 @@ func TestVolumeCopy_KeepsExistingReplicaWhenSourceUnreachable(t *testing.T) {
 		[]types.DiskType{types.HardDriveType}, [][]string{nil},
 		0, stats.DiskIOProbeConfig{},
 	)
+	t.Cleanup(store.Close)
 
 	const vid = needle.VolumeId(42)
 	if err := store.AddVolume(vid, "", storage.NeedleMapInMemory, "000", "", 0, needle.GetCurrentVersion(), 0, types.HardDriveType, 0); err != nil {

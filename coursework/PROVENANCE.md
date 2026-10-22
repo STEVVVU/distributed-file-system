@@ -1,0 +1,14 @@
+# Source and audit
+
+- Whole application: official [seaweedfs/seaweedfs](https://github.com/seaweedfs/seaweedfs), cloned without depth restriction on October 21, 2026.
+- Exact base: `106fd31af1c866d7ff235ade706cb4a1ba5805ba`, committed upstream October 21, 2026. The local repository retains the upstream history, module name, source APIs, license and notices.
+- License: [Apache-2.0](../LICENSE). No enterprise binary, enterprise service or unlicensed GoLFS student code was reused. New workbench files use this repository's existing Apache-2.0 license.
+- Original root README is preserved byte-for-byte as `README.upstream.md`. The replacement root README describes this adaptation and links to the original.
+- No third-party dependency was added or upgraded. Python uses only the standard library. The large inherited Go dependency graph supports the whole upstream application, beyond this HTTP experiment.
+- `go mod verify` passed. `govulncheck` v1.9.0 scanned the actual Windows binary and Go 1.27.3 standard library: zero reachable symbol vulnerabilities, zero imported-package vulnerabilities, and three module-only findings. These are [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) in `golang.org/x/crypto` and [GO-2022-0646](https://pkg.go.dev/vuln/GO-2022-0646)/[GO-2022-0635](https://pkg.go.dev/vuln/GO-2022-0635) in `github.com/aws/aws-sdk-go`. The scanner reports no fixed version for these module findings. This is a point-in-time scan, not a guarantee of security.
+- Local audit output: `.local/vulnerability-audit.txt` and `.local/vulnerability-audit-verbose.txt`. The binary SHA-256 is captured in each final verification result. Evidence stays local and is ignored by git.
+- Active CI uses official checkout/setup-go actions pinned to exact SHAs resolved from their v7 tags during this task. It has `contents: read`, no secret references, release uploads, publishing or deployment. All 74 inherited workflow files are retained unchanged with `.upstream` appended to their extensions, so they are inactive. No existing upstream workflow content was rewritten.
+
+The base has broad native test and integration suites, including Linux-only mounts and service-dependent tests. This change runs relevant native placement, repair and endpoint/copy tests; it does not claim all integrations, backends or native filesystem support. The full default Windows command application compiled without overlays. Source remains whole; optional build-tagged integrations were not compiled or exercised.
+
+The one inherited test change adds `t.Cleanup(store.Close)` in `TestVolumeCopy_KeepsExistingReplicaWhenSourceUnreachable`. The unmodified test twice failed Windows temporary-directory cleanup because `42.dat` was held open; the existing store fixture was never closed. The existing same-file fixture pattern supplies the fix. The storage assertion and endpoint validation remain unchanged.
