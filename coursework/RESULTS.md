@@ -44,3 +44,9 @@ Retained evidence (relative to repository root):
 - `.local/vulnerability-audit-verbose.txt` retains the binary dependency/security scan.
 
 No remote CI run, Linux runtime, feature-tagged backend, FUSE/WinFsp mount, multi-host failure, cloud service, power loss or production durability was verified. After the recovery proof, a missing-binary preflight guard was added and checked: exit 2, no run directory created. A further `python coursework/verify.py --run postcheck --scenario baseline` run passed. The only Go source change closes a test fixture.
+
+## Cleanup review follow-up
+
+Independent review found that a failed process termination lost its ownership handle and prevented later cleanup, and that a data-cleanup error could leave an intermediate success verdict. Both were reproduced without real process or filesystem mutation (`.local/cleanup-review-before.txt`). The driver now retains handles until successful wait, attempts every owned process/log cleanup, retains data if any process cannot be reaped, records cleanup errors, checks resolved deletion containment, and saves success only after cleanup succeeds.
+
+`python -m unittest discover -s coursework -p test_verify.py -v` passes eight deterministic regressions for termination/wait ownership, continuation, data/log cleanup failures, final verdict and resolved deletion boundaries. Output: `.local/cleanup-review-after.txt`. Updated actual driver proof is `.local/reviewed-proof/`; updated intentional failure is `.local/reviewed-failure/`. Run commands: `python coursework/verify.py --run reviewed-proof` and `python coursework/verify.py --run reviewed-failure --fail`. Their final results must have `cleanup_errors:[]`, scratch data absent, and respectively success and the deliberate failure verdict. Earlier proof directories remain for audit history.

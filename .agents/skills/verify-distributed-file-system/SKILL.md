@@ -21,7 +21,7 @@ The driver checks every owned process remains alive, records `/cluster/status`, 
 
 ## Cleanup
 
-The driver stops only subprocess handles it created in `finally`, waits for termination, closes logs, then deletes only its new run's scratch data. It retains manifests, ledgers, results and logs. If the Python interpreter is forcibly killed, inspect recorded PIDs and their command lines before manually terminating survivors; do not kill by process name.
+The driver stops only subprocess handles it created in `finally`, retains ownership until confirmed termination, attempts every process and log cleanup even if another fails, and deletes scratch data only after all processes are reaped. Every recursive-delete target is resolved and checked against the fresh run's owned data directory. Cleanup errors produce `passed:false`, `cleanup:false` and retained error details; final success is saved only after cleanup succeeds. It retains manifests, ledgers, results and logs. If the Python interpreter is forcibly killed, inspect recorded PIDs and their command lines before manually terminating survivors; do not kill by process name. Run `python -m unittest discover -s coursework -p test_verify.py -v` for deterministic cleanup/ownership/verdict/deletion-boundary regressions.
 
 ## Helpers
 

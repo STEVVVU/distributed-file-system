@@ -24,6 +24,7 @@ jobs:
       - run: go test ./weed/shell -run 'Test.*(Replica|Replication)' -count=1
       - run: go test ./weed/server -run 'Test.*(ReplicaTarget|RemoteEndpoint|BlockedIP|VolumeCopy)' -count=1
       - run: test -z "$(gofmt -l weed/server/volume_grpc_copy_verify_test.go)"
+      - run: python3 -m unittest discover -s coursework -p test_verify.py -v
       - run: python3 coursework/verify.py --run ci-recovery
       - name: Check deliberate failure and cleanup
         shell: bash

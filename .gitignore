@@ -144,4 +144,5 @@ weed_bin
 telemetry/server/telemetry-server
 .aider*
 /.local/
+/coursework/__pycache__/
 /seaweed-volume/docs

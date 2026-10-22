@@ -18,15 +18,19 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 class Workbench:
     def __init__(self, args):
         self.args = args
+        if (ROOT / ".local").resolve() != ROOT.resolve() / ".local":
+            raise ValueError(".local must resolve inside this repository")
+        with args.binary.open("rb") as binary:
+            binary_sha256 = hashlib.file_digest(binary, "sha256").hexdigest()
         self.out = ROOT / ".local" / args.run
         self.out.mkdir(parents=True, exist_ok=False)
         self.data = self.out / "data"
         self.data.mkdir()
+        self.owned_data = self.data.resolve()
         self.processes = {}
         self.logs = []
         self.result = {"passed": False, "events": [], "cleanup": False}
-        with args.binary.open("rb") as binary:
-            self.result["binary_sha256"] = hashlib.file_digest(binary, "sha256").hexdigest()
+        self.result["binary_sha256"] = binary_sha256
         self.result["upstream_sha"] = "106fd31af1c866d7ff235ade706cb4a1ba5805ba"
         self.master = args.port
         self.filer = args.port + 1
@@ -69,14 +73,25 @@ class Workbench:
         self.record("launch", name=name, pid=process.pid, command=command)
 
     def stop(self, name):
-        process = self.processes.pop(name)
-        process.terminate()
+        process = self.processes[name]
+        if process.poll() is None:
+            process.terminate()
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+        del self.processes[name]
         self.record("stop", name=name, returncode=process.returncode)
+
+    def remove_data(self, target):
+        expected = ROOT.resolve() / ".local" / self.args.run / "data"
+        resolved = target.resolve()
+        if self.owned_data != expected or self.data.resolve() != expected:
+            raise ValueError("owned data directory moved outside its fresh run")
+        if resolved != expected and not resolved.is_relative_to(expected):
+            raise ValueError("recursive-delete target is outside owned data")
+        shutil.rmtree(resolved)
 
     def start_master(self):
         self.start("master", ["master", "-ip=127.0.0.1", "-ip.bind=127.0.0.1",
@@ -188,7 +203,7 @@ class Workbench:
         self.stop(f"volume-{lost_index}")
         lost_dir = self.data / f"volume-{lost_index}"
         inventory = [{"name": item.name, "bytes": item.stat().st_size} for item in lost_dir.iterdir()]
-        shutil.rmtree(lost_dir)
+        self.remove_data(lost_dir)
         self.record("permanent-replica-loss", node=lost, removed_files=inventory)
         self.wait("master removes lost replicas", lambda: all(
             lost not in nodes for nodes in self.locations(self.placement(volume_ids)).values()), timeout=80)
@@ -253,12 +268,31 @@ class Workbench:
                             seconds=time.monotonic() - started)
 
     def cleanup(self):
+        errors = []
         for name in list(self.processes):
-            self.stop(name)
+            try:
+                self.stop(name)
+            except Exception as error:
+                errors.append(f"stop {name}: {type(error).__name__}: {error}")
         for log in self.logs:
-            log.close()
-        shutil.rmtree(self.data)
-        self.result["cleanup"] = True
+            try:
+                log.close()
+            except Exception as error:
+                errors.append(f"close log: {type(error).__name__}: {error}")
+        if self.processes:
+            errors.append(f"unreaped owned processes: {list(self.processes)}; data retained")
+        else:
+            try:
+                self.remove_data(self.data)
+            except Exception as error:
+                errors.append(f"remove data: {type(error).__name__}: {error}")
+        return errors
+
+    def finish(self, drive_passed):
+        errors = self.cleanup()
+        self.result["cleanup_errors"] = errors
+        self.result["cleanup"] = not errors
+        self.result["passed"] = drive_passed and not errors
         self.save()
 
 
@@ -277,14 +311,15 @@ def main():
     if not args.binary.is_file():
         parser.error("build the SeaweedFS binary before verification")
     workbench = Workbench(args)
+    drive_passed = False
     try:
         workbench.launch()
         workbench.drive()
-        workbench.result["passed"] = True
+        drive_passed = True
     except Exception as error:
         workbench.result["error"] = f"{type(error).__name__}: {error}"
     finally:
-        workbench.cleanup()
+        workbench.finish(drive_passed)
     print(workbench.out / "result.json")
     return 0 if workbench.result["passed"] else 1
 
