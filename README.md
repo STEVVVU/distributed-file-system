@@ -6,6 +6,7 @@
 - [Run the experiment](#run-the-experiment)
 - [What is proved](#what-is-proved)
 - [Repair boundary and research question](#repair-boundary-and-research-question)
+- [Implementation techniques](#implementation-techniques)
 - [Checks and provenance](#checks-and-provenance)
 
 The [frozen native benchmark](.agents/skills/verify-distributed-file-system/features/benchmark.md) measures the real master/filer/volume HTTP product. `python coursework/benchmark.py smoke` checks exact file bytes, range and deletion. `benchmark` runs five-repeat size/concurrency/operation cells, offered-load/stability and the existing guarded volume-loss/recovery journey on isolated Linux. `profile` captures separate native master/volume CPU profiles. Raw outcomes, latency, byte oracles, placements, storage and CPU/RSS survive under ignored `.local/benchmark-*`. Hosted results and their limits are below. Repair remains explicitly blocked by default replica endpoint policy; filer CPU is unprofiled.
@@ -155,6 +156,171 @@ Filer metadata maps paths to entries and their chunk manifests. The recovery che
 Re-replication copies data to restore the intended number of copies. This local run cannot prove it because the default volume-copy endpoint guard rejects loopback targets.
 </details>
 
+## Implementation techniques
+
+These techniques describe the coursework paths and the inherited SeaweedFS mechanisms they directly exercise; rationale is inferred from current code, not historical design intent.
+
+| Subsystem | Techniques | Sources |
+| --- | --- | --- |
+| File lifecycle and chunk manifest | [Chunk manifest addressing](#technique-chunk-manifest-addressing), [Range to chunk reads](#technique-range-to-chunk-reads), [Streaming byte hash oracle](#technique-streaming-bytehash-oracle) | [`coursework/verify.py`](coursework/verify.py), [`weed/filer/filechunks.go`](weed/filer/filechunks.go), [`weed/filer/filechunk_group.go`](weed/filer/filechunk_group.go), [`weed/server/common.go`](weed/server/common.go) |
+| Master placement and replication | [Master placement lookup](#technique-master-placement-lookup), [Controlled replica loss](#technique-replica-loss-and-restart) | [`coursework/verify.py`](coursework/verify.py), [`weed/topology/topology.go`](weed/topology/topology.go) |
+| Filer metadata persistence | [Metadata restart validation](#technique-metadata-restart-validation) | [`coursework/verify.py`](coursework/verify.py) |
+| Workbench process and data lifecycle | [Owned process lifecycle](#technique-owned-process-lifecycle) | [`coursework/verify.py`](coursework/verify.py) |
+| Repair boundary | [Guarded repair attempt](#technique-guarded-repair-attempt) | [`coursework/verify.py`](coursework/verify.py), [recovery feature](.agents/skills/verify-distributed-file-system/features/recovery.md) |
+| Native benchmark | [Controlled load and operation oracles](#technique-controlled-load-and-operation-oracles) | [`coursework/benchmark.py`](coursework/benchmark.py), [`coursework/benchmark_support.py`](coursework/benchmark_support.py), [benchmark feature](.agents/skills/verify-distributed-file-system/features/benchmark.md) |
+
+<a id="technique-chunk-manifest-addressing"></a>
+
+<details>
+<summary>Chunk manifests map paths to volume chunks</summary>
+
+**Mechanism.** The filer stores a path entry whose chunk manifest describes the file's byte segments and their volume file IDs. The driver uploads through the filer, fetches `?metadata=true`, and saves the returned manifest. It also records an illustrative 1 MiB segment ledger for its deterministic payload; the ledger is an oracle input, not the server manifest.
+
+**Example.** `/coursework/ledger.bin` resolves to multiple manifest entries, while `byte-ledger.json` records segment offsets and SHA-256 values.
+
+**Why here.** This checks that the normal path API joins metadata to stored chunk data.
+
+**Tradeoffs.** The manifest identifies chunk placement but does not itself prove every stored byte; the separate read oracle does that.
+
+**Code and ownership.** [`Workbench.drive`](coursework/verify.py#L150) is extension code. [`ViewFromChunks`](weed/filer/filechunks.go#L209) is inherited SeaweedFS code.
+
+</details>
+
+<a id="technique-range-to-chunk-reads"></a>
+
+<details>
+<summary>Translate byte ranges into chunk reads</summary>
+
+**Mechanism.** SeaweedFS parses the HTTP Range header, asks a callback for the requested offset and length, and streams only that section. Filer chunk grouping maps the section onto visible chunk intervals. The coursework requests bytes 1,048,570 through 1,048,590, crossing its configured 1 MiB boundary, and compares the returned slice exactly.
+
+**Example.** `Range: bytes=1048570-1048590` must return status 206 and the corresponding 21 payload bytes.
+
+**Why here.** A boundary-crossing request exercises both HTTP range handling and chunk mapping.
+
+**Tradeoffs.** The test covers one range; it does not establish behavior for every multi-range or malformed request form.
+
+**Code and ownership.** [`ProcessRangeRequest`](weed/server/common.go#L305) and [`readDataAtSequential`](weed/filer/filechunk_group.go#L117) are inherited. [`Workbench.drive`](coursework/verify.py#L165) supplies the check.
+
+</details>
+
+<a id="technique-streaming-bytehash-oracle"></a>
+
+<details>
+<summary>Stream reads through a SHA-256 byte oracle</summary>
+
+**Mechanism.** `verify_bytes` consumes the HTTP response in 64 KiB blocks, updates SHA-256, and counts bytes. It requires both length and digest to match the expected payload. Benchmark GET checks use the same exact-byte idea and record the digest with the result.
+
+**Example.** A read passes only when `size == len(expected)` and the streamed digest equals `sha256(expected)`.
+
+**Why here.** It checks complete file content without treating a successful HTTP status as proof of integrity.
+
+**Tradeoffs.** SHA-256 equality is a practical content oracle, while it does not prove persistence under power loss or hostile tampering of both expected data and receipts.
+
+**Code and ownership.** [`Workbench.verify_bytes`](coursework/verify.py#L140) and [`trial`](coursework/benchmark.py#L79) are coursework extensions.
+
+</details>
+
+<a id="technique-master-placement-lookup"></a>
+
+<details>
+<summary>Resolve chunk placement through master lookup</summary>
+
+**Mechanism.** For each manifest volume ID, the driver queries the master's `/dir/lookup` endpoint, saves the full responses, and reduces each response to its advertised location URLs. It takes snapshots before loss, while degraded, and after the repair attempt.
+
+**Example.** Each volume ID is queried with `read=yes`; the resulting location set is checked for two servers under replication `001`.
+
+**Why here.** Comparing actual placement makes the fault journey about the live cluster state rather than a configured replica count.
+
+**Tradeoffs.** Lookup reports the master's current view, so it does not alone establish that every listed copy is readable.
+
+**Code and ownership.** [`Workbench.placement`](coursework/verify.py#L186) adds the evidence capture; [`Topology.Lookup`](weed/topology/topology.go#L429) is inherited SeaweedFS topology code.
+
+</details>
+
+<a id="technique-replica-loss-and-restart"></a>
+
+<details>
+<summary>Exercise inherited two-copy replication with controlled loss</summary>
+
+**Mechanism.** The master and filer use the inherited `001` replication setting. In SeaweedFS this is a two-copy policy; the driver first confirms two locations, then stops one volume process and removes only that process's owned data. It waits for degraded placement, reads the acknowledged file, restarts master and filer against their same stores, and reads again.
+
+**Example.** A successful recovery read has matching size and SHA-256 after loss and after the master/filer restart.
+
+**Why here.** This tests availability of acknowledged bytes through one controlled replica failure and metadata service restart.
+
+**Tradeoffs.** Same-host process restart is not power-loss durability; degraded reads do not show replica restoration. No GFS primary lease or atomic append behavior is claimed.
+
+**Code and ownership.** [`Workbench.start_master`](coursework/verify.py#L93) configures inherited behavior; [`Workbench.recovery`](coursework/verify.py#L201) implements the coursework journey.
+
+</details>
+
+<a id="technique-metadata-restart-validation"></a>
+
+<details>
+<summary>Validate persisted filer metadata across restart</summary>
+
+**Mechanism.** The local filer writes metadata to its own configured store directory. After the master and filer stop, the driver starts them again in their existing process directories, waits for volumes to rejoin, fetches metadata for the same path, and requires its chunk list to equal the pre-restart list.
+
+**Example.** `restarted["chunks"] == chunks` must hold before recording `persistent-metadata`.
+
+**Why here.** This couples a byte reread with a structural check that the path still points to the same chunk manifest.
+
+**Tradeoffs.** It verifies process restart with unchanged local stores, not store corruption, host loss, or fsync guarantees.
+
+**Code and ownership.** [`Workbench.start_filer`](coursework/verify.py#L99) and [`Workbench.recovery`](coursework/verify.py#L225) are coursework setup and checks over inherited filer persistence.
+
+</details>
+
+<a id="technique-owned-process-lifecycle"></a>
+
+<details>
+<summary>Own process handles and constrain destructive cleanup</summary>
+
+**Mechanism.** The driver retains each subprocess handle and log, terminates and reaps owned processes during cleanup, then resolves the deletion target and checks it remains inside the fresh run's data directory before recursive removal. Cleanup failures are retained in the result rather than hidden.
+
+**Example.** Removing the lost replica calls `remove_data` only after stopping that volume; the method rejects targets outside `.local/<run>/data`.
+
+**Why here.** Repeated fault runs need isolated process and storage ownership, with evidence left outside the deleted data tree.
+
+**Tradeoffs.** Cleanup can fail and leave owned data behind; the driver reports that failure and marks the run unsuccessful.
+
+**Code and ownership.** [`Workbench.start`](coursework/verify.py#L69), [`Workbench.remove_data`](coursework/verify.py#L85), and [`Workbench.cleanup`](coursework/verify.py#L277) are coursework extensions.
+
+</details>
+
+<a id="technique-guarded-repair-attempt"></a>
+
+<details>
+<summary>Attempt repair while preserving the endpoint guard</summary>
+
+**Mechanism.** The recovery journey invokes the inherited `volume.fix.replication` shell command with apply enabled and zero retries, saves its output, checks for the loopback endpoint rejection, then takes another placement snapshot and requires it to remain unchanged. The result records `repair.proved:false`.
+
+**Example.** An exit code of zero is insufficient: the server's rejection text and unchanged degraded placement are both required.
+
+**Why here.** This makes the repair boundary observable without disabling the inherited endpoint safety policy.
+
+**Tradeoffs.** The journey proves that local loopback repair is blocked. It does not prove re-replication or survival after another loss.
+
+**Code and ownership.** [`Workbench.recovery`](coursework/verify.py#L232) and [`Workbench.snapshot`](coursework/verify.py#L196) are coursework checks around inherited repair behavior.
+
+</details>
+
+<a id="technique-controlled-load-and-operation-oracles"></a>
+
+<details>
+<summary>Separate offered load from verified operation outcomes</summary>
+
+**Mechanism.** The native benchmark fixes workload inputs, launches isolated real processes per trial, and records transaction offers, completion outcomes, and per-operation oracles. PUT readback checks bytes outside the timed response; GET timing includes full-byte digest validation; metadata timing covers stat plus listing. The recovery cell reuses the guarded fault journey.
+
+**Example.** Each measured cell retains trial results and payload digests; smoke mode checks lifecycle and range bytes without presenting timings as performance results.
+
+**Why here.** Separating timing scopes from content checks makes each recorded operation's evidence explicit.
+
+**Tradeoffs.** Warm-cache reads and screening thresholds describe this workload only; they are not production guarantees.
+
+**Code and ownership.** [`trial`](coursework/benchmark.py#L59), [`main`](coursework/benchmark.py#L132), and [`load`](coursework/benchmark_support.py#L97) are coursework extensions.
+
+</details>
 ## Run the experiment
 
 Requirements: Go 1.26.6 or newer, Python 3.11 or newer, and six free loopback HTTP ports plus their gRPC counterparts. Tested locally on Windows amd64 with Go 1.27.3, Python 3.11, and CGO disabled. No Docker, FUSE driver, cloud account or API keys are needed.
