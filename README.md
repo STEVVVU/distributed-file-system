@@ -19,9 +19,40 @@ Upstream is pinned to [`106fd31af1c866d7ff235ade706cb4a1ba5805ba`](https://githu
 
 ## Architecture and execution guide
 
+### Subsystem map
+
+Select a subsystem in the diagram to open its techniques, tradeoffs, and code references. The numbered links provide the same navigation. This map groups components; the execution diagrams show their runtime flow.
+
+```mermaid
+flowchart LR
+    system["Distributed File System"]
+    system --> s1["1. File lifecycle and chunk<br/>manifest"]
+    click s1 href "https://github.com/STEVVVU/distributed-file-system#subsystem-file-lifecycle-and-chunk-manifest" "Explore File lifecycle and chunk manifest" _top
+    system --> s2["2. Master placement and<br/>replication"]
+    click s2 href "https://github.com/STEVVVU/distributed-file-system#subsystem-master-placement-and-replication" "Explore Master placement and replication" _top
+    system --> s3["3. Filer metadata persistence"]
+    click s3 href "https://github.com/STEVVVU/distributed-file-system#subsystem-filer-metadata-persistence" "Explore Filer metadata persistence" _top
+    system --> s4["4. Workbench process and data<br/>lifecycle"]
+    click s4 href "https://github.com/STEVVVU/distributed-file-system#subsystem-workbench-process-and-data-lifecycle" "Explore Workbench process and data lifecycle" _top
+    system --> s5["5. Repair boundary"]
+    click s5 href "https://github.com/STEVVVU/distributed-file-system#subsystem-repair-boundary" "Explore Repair boundary" _top
+    system --> s6["6. Native benchmark"]
+    click s6 href "https://github.com/STEVVVU/distributed-file-system#subsystem-native-benchmark" "Explore Native benchmark" _top
+```
+
+1. [File lifecycle and chunk manifest](#subsystem-file-lifecycle-and-chunk-manifest)
+2. [Master placement and replication](#subsystem-master-placement-and-replication)
+3. [Filer metadata persistence](#subsystem-filer-metadata-persistence)
+4. [Workbench process and data lifecycle](#subsystem-workbench-process-and-data-lifecycle)
+5. [Repair boundary](#subsystem-repair-boundary)
+6. [Native benchmark](#subsystem-native-benchmark)
+
 The complete upstream SeaweedFS application supplies the master, filer, volume servers, HTTP APIs, replication, and metadata persistence. The added coursework scope is a local real-process experiment driver and evidence format. The driver observes normal SeaweedFS APIs and process behavior; it does not add a replacement storage protocol or change replica repair policy.
 
 This boundary map shows the real process roles used by the workbench.
+
+<details>
+<summary>Expand flow diagram 1</summary>
 
 ```mermaid
 flowchart LR
@@ -36,9 +67,14 @@ flowchart LR
     driver -. "launches and checks" .-> volumes
 ```
 
+</details>
+
 The filer handles file paths and metadata, then coordinates chunk reads and writes with volume servers. The master tracks volume placement and answers lookup requests. The verification driver starts these inherited processes on loopback and records their actual responses and owned process IDs.
 
 This flow follows the file lifecycle and the constrained recovery journey.
+
+<details>
+<summary>Expand flow diagram 2</summary>
 
 ```mermaid
 flowchart TD
@@ -63,6 +99,8 @@ flowchart TD
     loss --> master
     blocked --> result["Retain result, logs, placement, and hashes"]
 ```
+
+</details>
 
 The driver deletes only data beneath the fresh run's `.local/<run>/data` after resolving and checking containment. It verifies file bytes by streaming SHA-256 and records placements before and after loss. Repair remains blocked because the inherited endpoint guard rejects loopback copy targets. A passing run therefore proves reads after one replica loss and process restarts, not restoration of replica count.
 
@@ -160,6 +198,9 @@ Re-replication copies data to restore the intended number of copies. This local 
 
 These techniques describe the coursework paths and the inherited SeaweedFS mechanisms they directly exercise; rationale is inferred from current code, not historical design intent.
 
+<details>
+<summary>Full technique index</summary>
+
 | Subsystem | Techniques | Sources |
 | --- | --- | --- |
 | File lifecycle and chunk manifest | [Chunk manifest addressing](#technique-chunk-manifest-addressing), [Range to chunk reads](#technique-range-to-chunk-reads), [Streaming byte hash oracle](#technique-streaming-bytehash-oracle) | [`coursework/verify.py`](coursework/verify.py), [`weed/filer/filechunks.go`](weed/filer/filechunks.go), [`weed/filer/filechunk_group.go`](weed/filer/filechunk_group.go), [`weed/server/common.go`](weed/server/common.go) |
@@ -168,6 +209,20 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 | Workbench process and data lifecycle | [Owned process lifecycle](#technique-owned-process-lifecycle) | [`coursework/verify.py`](coursework/verify.py) |
 | Repair boundary | [Guarded repair attempt](#technique-guarded-repair-attempt) | [`coursework/verify.py`](coursework/verify.py), [recovery feature](.agents/skills/verify-distributed-file-system/features/recovery.md) |
 | Native benchmark | [Controlled load and operation oracles](#technique-controlled-load-and-operation-oracles) | [`coursework/benchmark.py`](coursework/benchmark.py), [`coursework/benchmark_support.py`](coursework/benchmark_support.py), [benchmark feature](.agents/skills/verify-distributed-file-system/features/benchmark.md) |
+
+</details>
+
+<a id="subsystem-file-lifecycle-and-chunk-manifest"></a>
+
+### 1. File lifecycle and chunk manifest
+
+[Back to the subsystem map](#architecture-and-execution-guide).
+
+**Code.** [`coursework/verify.py`](coursework/verify.py), [`weed/filer/filechunk_group.go`](weed/filer/filechunk_group.go), [`weed/filer/filechunks.go`](weed/filer/filechunks.go).
+
+**Techniques.** [Chunk manifests map paths to volume chunks](#technique-chunk-manifest-addressing), [Translate byte ranges into chunk reads](#technique-range-to-chunk-reads), [Stream reads through a SHA-256 byte oracle](#technique-streaming-bytehash-oracle).
+
+**Related concepts.** [SeaweedFS](#concept-seaweedfs), [filer](#concept-filer), [chunk](#concept-chunk).
 
 <a id="technique-chunk-manifest-addressing"></a>
 
@@ -183,6 +238,10 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 **Tradeoffs.** The manifest identifies chunk placement but does not itself prove every stored byte; the separate read oracle does that.
 
 **Code and ownership.** [`Workbench.drive`](coursework/verify.py#L150) is extension code. [`ViewFromChunks`](weed/filer/filechunks.go#L209) is inherited SeaweedFS code.
+
+
+
+**Used in.** [File lifecycle and chunk manifest](#subsystem-file-lifecycle-and-chunk-manifest). [Back to the subsystem map](#architecture-and-execution-guide).
 
 </details>
 
@@ -201,6 +260,10 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 
 **Code and ownership.** [`ProcessRangeRequest`](weed/server/common.go#L305) and [`readDataAtSequential`](weed/filer/filechunk_group.go#L117) are inherited. [`Workbench.drive`](coursework/verify.py#L165) supplies the check.
 
+
+
+**Used in.** [File lifecycle and chunk manifest](#subsystem-file-lifecycle-and-chunk-manifest). [Back to the subsystem map](#architecture-and-execution-guide).
+
 </details>
 
 <a id="technique-streaming-bytehash-oracle"></a>
@@ -218,7 +281,23 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 
 **Code and ownership.** [`Workbench.verify_bytes`](coursework/verify.py#L140) and [`trial`](coursework/benchmark.py#L79) are coursework extensions.
 
+
+
+**Used in.** [File lifecycle and chunk manifest](#subsystem-file-lifecycle-and-chunk-manifest). [Back to the subsystem map](#architecture-and-execution-guide).
+
 </details>
+
+<a id="subsystem-master-placement-and-replication"></a>
+
+### 2. Master placement and replication
+
+[Back to the subsystem map](#architecture-and-execution-guide).
+
+**Code.** [`coursework/verify.py`](coursework/verify.py), [`weed/topology/topology.go`](weed/topology/topology.go).
+
+**Techniques.** [Resolve chunk placement through master lookup](#technique-master-placement-lookup), [Exercise inherited two-copy replication with controlled loss](#technique-replica-loss-and-restart).
+
+**Related concepts.** [SeaweedFS](#concept-seaweedfs), [master](#concept-master), [filer](#concept-filer), [chunk](#concept-chunk).
 
 <a id="technique-master-placement-lookup"></a>
 
@@ -234,6 +313,10 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 **Tradeoffs.** Lookup reports the master's current view, so it does not alone establish that every listed copy is readable.
 
 **Code and ownership.** [`Workbench.placement`](coursework/verify.py#L186) adds the evidence capture; [`Topology.Lookup`](weed/topology/topology.go#L429) is inherited SeaweedFS topology code.
+
+
+
+**Used in.** [Master placement and replication](#subsystem-master-placement-and-replication). [Back to the subsystem map](#architecture-and-execution-guide).
 
 </details>
 
@@ -252,7 +335,23 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 
 **Code and ownership.** [`Workbench.start_master`](coursework/verify.py#L93) configures inherited behavior; [`Workbench.recovery`](coursework/verify.py#L201) implements the coursework journey.
 
+
+
+**Used in.** [Master placement and replication](#subsystem-master-placement-and-replication). [Back to the subsystem map](#architecture-and-execution-guide).
+
 </details>
+
+<a id="subsystem-filer-metadata-persistence"></a>
+
+### 3. Filer metadata persistence
+
+[Back to the subsystem map](#architecture-and-execution-guide).
+
+**Code.** [`coursework/verify.py`](coursework/verify.py).
+
+**Techniques.** [Validate persisted filer metadata across restart](#technique-metadata-restart-validation).
+
+**Related concepts.** [master](#concept-master), [filer](#concept-filer), [chunk](#concept-chunk), [filer metadata](#concept-filer-metadata).
 
 <a id="technique-metadata-restart-validation"></a>
 
@@ -269,7 +368,21 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 
 **Code and ownership.** [`Workbench.start_filer`](coursework/verify.py#L99) and [`Workbench.recovery`](coursework/verify.py#L225) are coursework setup and checks over inherited filer persistence.
 
+
+
+**Used in.** [Filer metadata persistence](#subsystem-filer-metadata-persistence). [Back to the subsystem map](#architecture-and-execution-guide).
+
 </details>
+
+<a id="subsystem-workbench-process-and-data-lifecycle"></a>
+
+### 4. Workbench process and data lifecycle
+
+[Back to the subsystem map](#architecture-and-execution-guide).
+
+**Code.** [`coursework/verify.py`](coursework/verify.py).
+
+**Techniques.** [Own process handles and constrain destructive cleanup](#technique-owned-process-lifecycle).
 
 <a id="technique-owned-process-lifecycle"></a>
 
@@ -286,7 +399,23 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 
 **Code and ownership.** [`Workbench.start`](coursework/verify.py#L69), [`Workbench.remove_data`](coursework/verify.py#L85), and [`Workbench.cleanup`](coursework/verify.py#L277) are coursework extensions.
 
+
+
+**Used in.** [Workbench process and data lifecycle](#subsystem-workbench-process-and-data-lifecycle). [Back to the subsystem map](#architecture-and-execution-guide).
+
 </details>
+
+<a id="subsystem-repair-boundary"></a>
+
+### 5. Repair boundary
+
+[Back to the subsystem map](#architecture-and-execution-guide).
+
+**Code.** [`coursework/verify.py`](coursework/verify.py).
+
+**Techniques.** [Attempt repair while preserving the endpoint guard](#technique-guarded-repair-attempt).
+
+**Related concepts.** [re-replication](#concept-re-replication).
 
 <a id="technique-guarded-repair-attempt"></a>
 
@@ -303,7 +432,21 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 
 **Code and ownership.** [`Workbench.recovery`](coursework/verify.py#L232) and [`Workbench.snapshot`](coursework/verify.py#L196) are coursework checks around inherited repair behavior.
 
+
+
+**Used in.** [Repair boundary](#subsystem-repair-boundary). [Back to the subsystem map](#architecture-and-execution-guide).
+
 </details>
+
+<a id="subsystem-native-benchmark"></a>
+
+### 6. Native benchmark
+
+[Back to the subsystem map](#architecture-and-execution-guide).
+
+**Code.** [`coursework/benchmark.py`](coursework/benchmark.py), [`coursework/benchmark_support.py`](coursework/benchmark_support.py), [`.agents/skills/verify-distributed-file-system/features/benchmark.md`](.agents/skills/verify-distributed-file-system/features/benchmark.md).
+
+**Techniques.** [Separate offered load from verified operation outcomes](#technique-controlled-load-and-operation-oracles).
 
 <a id="technique-controlled-load-and-operation-oracles"></a>
 
@@ -320,7 +463,12 @@ These techniques describe the coursework paths and the inherited SeaweedFS mecha
 
 **Code and ownership.** [`trial`](coursework/benchmark.py#L59), [`main`](coursework/benchmark.py#L132), and [`load`](coursework/benchmark_support.py#L97) are coursework extensions.
 
+
+
+**Used in.** [Native benchmark](#subsystem-native-benchmark). [Back to the subsystem map](#architecture-and-execution-guide).
+
 </details>
+
 ## Run the experiment
 
 Requirements: Go 1.26.6 or newer, Python 3.11 or newer, and six free loopback HTTP ports plus their gRPC counterparts. Tested locally on Windows amd64 with Go 1.27.3, Python 3.11, and CGO disabled. No Docker, FUSE driver, cloud account or API keys are needed.
