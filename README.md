@@ -19,6 +19,491 @@ Upstream is pinned to [`106fd31af1c866d7ff235ade706cb4a1ba5805ba`](https://githu
 
 ## Architecture and execution guide
 
+<!-- execution-flow:start -->
+### Execution flow
+
+Start with the primary path, then expand a detailed workflow. Select a numbered node to see its operation, implementation techniques, and source. Solid arrows show the named control, data, or lifecycle handoff; dotted arrows show error paths. Separate entry points are named in each workflow.
+
+<a id="review-walkthrough"></a>
+
+#### Walk through one concrete example
+
+Upload a multi-chunk ledger.bin through the filer HTTP API, then issue a separate GET for a byte range crossing the 1 MiB boundary.
+
+**Trace.** [Accept filer HTTP upload](#flow-step-http-write) → [Split input into bounded chunks](#flow-step-split) → [Assign chunk ID and volume target](#flow-step-assign) → [Upload chunk and validate request](#flow-step-volume-upload) → [Append needle and publish its index](#flow-step-needle-store) → [Forward to replica locations and join](#flow-step-replicate) → [Publish the path and chunk records](#flow-step-metadata-store).
+
+**Result and boundary.** The filer acknowledges after chunk uploads and metadata creation succeed. A subsequent HTTP GET enters product-read, loads the stored chunk records, clips views to the requested range, discovers volume URLs and streams indexed needle bytes as 206. Verification separately compares those bytes to an independent expected slice. Restart evidence covers retained process stores; repair remains blocked and power-loss durability is not established.
+
+The client then makes a separate HTTP GET with the boundary-crossing Range header; upload does not trigger this request.
+
+**Follow-up trace.** [Load the entry for GET or HEAD](#flow-step-http-read) → [Validate range and prepare chunk views](#flow-step-range-plan) → [Resolve locations and fetch ordered chunks](#flow-step-chunk-fetch) → [Read the indexed needle and check data](#flow-step-needle-read) → [Return complete bytes or partial content](#flow-step-http-result).
+
+The filer clips chunk views to the requested range, resolves volume locations, and streams the volume bytes through ordered pipes to the response. Whole-needle CRC checks do not establish checksum validation for every arbitrary partial range.
+
+<details>
+<summary>Implementation decisions to explain</summary>
+
+**Why separate volume chunk writes from publishing the path metadata?** The filer records volume IDs and offsets only after chunk uploads complete, then persists the entry. This separates byte storage from namespace lookup and permits cleanup of uncommitted chunks on upload, digest or metadata failure. It also leaves distinct volume and filer-store failure boundaries; an upload response is not proof of power-loss durability.
+
+[Chunk manifests map paths to volume chunks](#technique-chunk-manifest-addressing) · [Validate persisted filer metadata across restart](#technique-metadata-restart-validation).
+
+**Why discover chunk locations for a range rather than store one server URL in the file entry?** The entry names chunk file IDs and byte intervals. Reads clip those intervals and resolve current volume locations, so the same file can remain readable from a surviving replica after a location disappears. Discovery retries do not create replacement copies. The experiment checks survivor bytes and unchanged metadata, while its guarded repair attempt proves no successful re-replication.
+
+[Resolve chunk placement through master lookup](#technique-master-placement-lookup) · [Translate byte ranges into chunk reads](#technique-range-to-chunk-reads) · [Exercise inherited two-copy replication with controlled loss](#technique-replica-loss-and-restart).
+
+</details>
+
+#### Primary execution flow
+
+Active filer HTTP PUT or multipart POST path. Inherited SeaweedFS product execution, independent of the Python verification driver. Chunk uploads run concurrently; metadata publication joins them. The separate HTTP read workflow shows full GET and byte-range responses.
+
+```mermaid
+flowchart TD
+    n11["11. Accept filer HTTP upload"]
+    click n11 href "https://github.com/STEVVVU/distributed-file-system#flow-step-http-write" "Open step, techniques, and source" _top
+    n12["12. Split input into bounded<br/>chunks"]
+    click n12 href "https://github.com/STEVVVU/distributed-file-system#flow-step-split" "Open step, techniques, and source" _top
+    n13["13. Assign chunk ID and volume<br/>target"]
+    click n13 href "https://github.com/STEVVVU/distributed-file-system#flow-step-assign" "Open step, techniques, and source" _top
+    n14["14. Upload chunk and validate<br/>request"]
+    click n14 href "https://github.com/STEVVVU/distributed-file-system#flow-step-volume-upload" "Open step, techniques, and source" _top
+    n15["15. Append needle and publish<br/>its index"]
+    click n15 href "https://github.com/STEVVVU/distributed-file-system#flow-step-needle-store" "Open step, techniques, and source" _top
+    n16["16. Forward to replica locations<br/>and join"]
+    click n16 href "https://github.com/STEVVVU/distributed-file-system#flow-step-replicate" "Open step, techniques, and source" _top
+    n17["17. Publish the path and chunk<br/>records"]
+    click n17 href "https://github.com/STEVVVU/distributed-file-system#flow-step-metadata-store" "Open step, techniques, and source" _top
+    n23["23. Return upload or preparation<br/>failure"]
+    click n23 href "https://github.com/STEVVVU/distributed-file-system#flow-step-http-error" "Open step, techniques, and source" _top
+    n11 -->|"PostHandler calls autoChunk for normal<br/>upload"| n12
+    n12 -->|"each upload goroutine calls<br/>dataToChunkWithSSE"| n13
+    n13 -->|"assignment supplies URL, file ID and<br/>JWT for HTTP upload"| n14
+    n14 -->|"ReplicatedWrite calls<br/>Store.WriteVolumeNeedle locally"| n15
+    n15 -->|"local write succeeds before remote<br/>fanout"| n16
+    n16 -->|"successful chunk results join before<br/>doPutAutoChunk saves metadata"| n17
+    n14 -->|"transient or reassignment failure<br/>retries with fresh assignment"| n13
+    n12 -.->|"uploadErr after wait deletes<br/>uncommitted chunks and returns"| n23
+    n17 -.->|"save error bubbles to autoChunk error<br/>mapping"| n23
+```
+
+**Detailed workflows.** [HTTP upload through chunk storage and metadata](#flow-workflow-product-upload) · [HTTP GET and byte ranges through volume needles](#flow-workflow-product-read) · [Real-process file and recovery verification](#flow-workflow-verification) · [Native benchmark trial and cleanup](#flow-workflow-native-benchmark) · [Local volume startup and index recovery](#flow-workflow-volume-restart).
+
+<a id="flow-workflow-product-upload"></a>
+
+<details>
+<summary>HTTP upload through chunk storage and metadata</summary>
+
+Active filer HTTP PUT or multipart POST path. Inherited SeaweedFS product execution, independent of the Python verification driver. Chunk uploads run concurrently; metadata publication joins them.
+
+```mermaid
+flowchart TD
+    n11["11. Accept filer HTTP upload"]
+    click n11 href "https://github.com/STEVVVU/distributed-file-system#flow-step-http-write" "Open step, techniques, and source" _top
+    n12["12. Split input into bounded<br/>chunks"]
+    click n12 href "https://github.com/STEVVVU/distributed-file-system#flow-step-split" "Open step, techniques, and source" _top
+    n13["13. Assign chunk ID and volume<br/>target"]
+    click n13 href "https://github.com/STEVVVU/distributed-file-system#flow-step-assign" "Open step, techniques, and source" _top
+    n14["14. Upload chunk and validate<br/>request"]
+    click n14 href "https://github.com/STEVVVU/distributed-file-system#flow-step-volume-upload" "Open step, techniques, and source" _top
+    n15["15. Append needle and publish<br/>its index"]
+    click n15 href "https://github.com/STEVVVU/distributed-file-system#flow-step-needle-store" "Open step, techniques, and source" _top
+    n16["16. Forward to replica locations<br/>and join"]
+    click n16 href "https://github.com/STEVVVU/distributed-file-system#flow-step-replicate" "Open step, techniques, and source" _top
+    n17["17. Publish the path and chunk<br/>records"]
+    click n17 href "https://github.com/STEVVVU/distributed-file-system#flow-step-metadata-store" "Open step, techniques, and source" _top
+    n23["23. Return upload or preparation<br/>failure"]
+    click n23 href "https://github.com/STEVVVU/distributed-file-system#flow-step-http-error" "Open step, techniques, and source" _top
+    n11 -->|"PostHandler calls autoChunk for normal<br/>upload"| n12
+    n12 -->|"each upload goroutine calls<br/>dataToChunkWithSSE"| n13
+    n13 -->|"assignment supplies URL, file ID and<br/>JWT for HTTP upload"| n14
+    n14 -->|"ReplicatedWrite calls<br/>Store.WriteVolumeNeedle locally"| n15
+    n15 -->|"local write succeeds before remote<br/>fanout"| n16
+    n16 -->|"successful chunk results join before<br/>doPutAutoChunk saves metadata"| n17
+    n14 -->|"transient or reassignment failure<br/>retries with fresh assignment"| n13
+    n12 -.->|"uploadErr after wait deletes<br/>uncommitted chunks and returns"| n23
+    n17 -.->|"save error bubbles to autoChunk error<br/>mapping"| n23
+```
+
+</details>
+
+<a id="flow-workflow-product-read"></a>
+
+<details>
+<summary>HTTP GET and byte ranges through volume needles</summary>
+
+Independent HTTP GET entry against an existing file. The upload response does not call GET. Metadata-only and HEAD requests return without fetching chunks.
+
+```mermaid
+flowchart TD
+    n18["18. Load the entry for GET or<br/>HEAD"]
+    click n18 href "https://github.com/STEVVVU/distributed-file-system#flow-step-http-read" "Open step, techniques, and source" _top
+    n19["19. Validate range and prepare<br/>chunk views"]
+    click n19 href "https://github.com/STEVVVU/distributed-file-system#flow-step-range-plan" "Open step, techniques, and source" _top
+    n20["20. Resolve locations and fetch<br/>ordered chunks"]
+    click n20 href "https://github.com/STEVVVU/distributed-file-system#flow-step-chunk-fetch" "Open step, techniques, and source" _top
+    n21["21. Read the indexed needle and<br/>check data"]
+    click n21 href "https://github.com/STEVVVU/distributed-file-system#flow-step-needle-read" "Open step, techniques, and source" _top
+    n22["22. Return complete bytes or<br/>partial content"]
+    click n22 href "https://github.com/STEVVVU/distributed-file-system#flow-step-http-result" "Open step, techniques, and source" _top
+    n23["23. Return upload or preparation<br/>failure"]
+    click n23 href "https://github.com/STEVVVU/distributed-file-system#flow-step-http-error" "Open step, techniques, and source" _top
+    n18 -->|"normal file GET calls<br/>ProcessRangeRequest"| n19
+    n19 -->|"prepared chunk views request file ID<br/>locations"| n20
+    n20 -->|"prefetched chunk HTTP requests reach<br/>volume GET"| n21
+    n21 -->|"volume bytes flow through ordered<br/>pipes into response writer"| n22
+    n19 -.->|"invalid or unpreparable range returns<br/>failure"| n23
+    n20 -.->|"exhausted prepare or stream failure<br/>propagates"| n23
+```
+
+</details>
+
+<a id="flow-workflow-verification"></a>
+
+<details>
+<summary>Real-process file and recovery verification</summary>
+
+Entry coursework/verify.py main; recovery is optional and local repair must remain blocked by endpoint guard.
+
+```mermaid
+flowchart TD
+    n1["1. Launch isolated real<br/>processes"]
+    click n1 href "https://github.com/STEVVVU/distributed-file-system#flow-step-workbench" "Open step, techniques, and source" _top
+    n2["2. Upload and retain manifest"]
+    click n2 href "https://github.com/STEVVVU/distributed-file-system#flow-step-upload" "Open step, techniques, and source" _top
+    n3["3. Verify bytes and cross-chunk<br/>range"]
+    click n3 href "https://github.com/STEVVVU/distributed-file-system#flow-step-byte-range" "Open step, techniques, and source" _top
+    n4["4. List, overwrite and delete"]
+    click n4 href "https://github.com/STEVVVU/distributed-file-system#flow-step-mutations" "Open step, techniques, and source" _top
+    n5["5. Lose one placed replica"]
+    click n5 href "https://github.com/STEVVVU/distributed-file-system#flow-step-loss" "Open step, techniques, and source" _top
+    n6["6. Restart master and filer;<br/>check metadata"]
+    click n6 href "https://github.com/STEVVVU/distributed-file-system#flow-step-restart" "Open step, techniques, and source" _top
+    n7["7. Prove guarded repair remains<br/>blocked"]
+    click n7 href "https://github.com/STEVVVU/distributed-file-system#flow-step-repair-blocked" "Open step, techniques, and source" _top
+    n8["8. Check retained replicas and<br/>bounded outage"]
+    click n8 href "https://github.com/STEVVVU/distributed-file-system#flow-step-outage" "Open step, techniques, and source" _top
+    n10["10. Clean owned processes and<br/>data"]
+    click n10 href "https://github.com/STEVVVU/distributed-file-system#flow-step-cleanup" "Open step, techniques, and source" _top
+    n1 -->|"ready"| n2
+    n2 -->|"upload verification"| n3
+    n3 -->|"range passes"| n4
+    n4 -->|"recovery selected"| n5
+    n5 -->|"readable survivor"| n6
+    n6 -->|"same chunks"| n7
+    n7 -->|"guard proof"| n8
+    n8 -->|"finally"| n10
+    n4 -->|"baseline returns; finally cleans up"| n10
+```
+
+</details>
+
+<a id="flow-workflow-native-benchmark"></a>
+
+<details>
+<summary>Native benchmark trial and cleanup</summary>
+
+Independent benchmark entry runs native trials, real operation oracles and separate sampler/process cleanup; it is not dispatched by verification CLI.
+
+```mermaid
+flowchart TD
+    n1["1. Launch isolated real<br/>processes"]
+    click n1 href "https://github.com/STEVVVU/distributed-file-system#flow-step-workbench" "Open step, techniques, and source" _top
+    n9["9. Run native operation oracles"]
+    click n9 href "https://github.com/STEVVVU/distributed-file-system#flow-step-benchmark" "Open step, techniques, and source" _top
+    n10["10. Clean owned processes and<br/>data"]
+    click n10 href "https://github.com/STEVVVU/distributed-file-system#flow-step-cleanup" "Open step, techniques, and source" _top
+    n1 -->|"native processes ready"| n9
+    n9 -->|"trial ends or fails"| n10
+```
+
+</details>
+
+<a id="flow-workflow-volume-restart"></a>
+
+<details>
+<summary>Local volume startup and index recovery</summary>
+
+Volume startup loads retained data and index files before subsequent volume GETs. This does not restore a destroyed replica or bypass endpoint policy.
+
+```mermaid
+flowchart TD
+    n24["24. Reload volume files and<br/>needle map"]
+    click n24 href "https://github.com/STEVVVU/distributed-file-system#flow-step-volume-load" "Open step, techniques, and source" _top
+    n21["21. Read the indexed needle and<br/>check data"]
+    click n21 href "https://github.com/STEVVVU/distributed-file-system#flow-step-needle-read" "Open step, techniques, and source" _top
+    n24 -->|"loaded needle map is consulted by<br/>subsequent volume GET"| n21
+```
+
+</details>
+
+#### Steps, techniques, and source
+
+These source traces cover the active scope below. They explain implementation behavior; benchmark results and their limits remain in the measurement sections.
+
+<a id="flow-step-workbench"></a>
+
+##### 1. Launch isolated real processes
+
+**Component.** coursework.verify.Workbench. Validates run name and port range, creates fresh run/data directories and owns process handles. Starts loopback master, three volumes, then filer, probing readiness.
+
+**Techniques at this step.** [Own process handles and constrain destructive cleanup](#technique-owned-process-lifecycle).
+
+**Source.** [`coursework/verify.py:19`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L19) · [`coursework/verify.py:119`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L119). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-upload"></a>
+
+##### 2. Upload and retain manifest
+
+**Component.** Workbench.drive and filer chunks. Builds a segmented payload and SHA-256 ledger, uploads it, fetches metadata and requires multiple chunks. ViewFromChunks derives visible intervals from chunk metadata.
+
+**Techniques at this step.** [Chunk manifests map paths to volume chunks](#technique-chunk-manifest-addressing).
+
+**Source.** [`coursework/verify.py:149`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L149) · [`weed/filer/filechunks.go:209`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/filer/filechunks.go#L209). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-byte-range"></a>
+
+##### 3. Verify bytes and cross-chunk range
+
+**Component.** Workbench.verify_bytes and ProcessRangeRequest. Verification streams full reads through SHA-256 and checks byte count. It requests a range crossing the 1 MiB boundary and requires status 206 plus the exact expected slice. The active HTTP product path uses visible chunk views and prefetched streaming; ChunkGroup is an inherited separate reader implementation, not the HTTP handler call chain.
+
+**Techniques at this step.** [Stream reads through a SHA-256 byte oracle](#technique-streaming-bytehash-oracle) · [Translate byte ranges into chunk reads](#technique-range-to-chunk-reads).
+
+**Source.** [`coursework/verify.py:139`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L139) · [`coursework/verify.py:165`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L165) · [`weed/server/common.go:305`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/common.go#L305) · [`weed/filer/filechunk_group.go:117`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/filer/filechunk_group.go#L117). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-mutations"></a>
+
+##### 4. List, overwrite and delete
+
+**Component.** Workbench.drive. Checks listing, overwrites a separate file and verifies replacement bytes, then deletes it and requires HTTP 404 on read.
+
+Direct filer API verification with no distinct ledger technique.
+
+**Source.** [`coursework/verify.py:170`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L170). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-loss"></a>
+
+##### 5. Lose one placed replica
+
+**Component.** Workbench.recovery and Topology.Lookup. Looks up manifest volume placement and requires two locations, stops one selected volume and removes only its contained run data. Waits for the lost node to disappear from lookup and verifies the acknowledged file from survivors.
+
+**Techniques at this step.** [Resolve chunk placement through master lookup](#technique-master-placement-lookup) · [Exercise inherited two-copy replication with controlled loss](#technique-replica-loss-and-restart).
+
+**Source.** [`coursework/verify.py:186`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L186) · [`coursework/verify.py:201`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L201) · [`weed/topology/topology.go:429`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/topology/topology.go#L429). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-restart"></a>
+
+##### 6. Restart master and filer; check metadata
+
+**Component.** Workbench.recovery. Restarts master and filer using unchanged stores, waits for surviving volumes to rejoin, verifies bytes and requires identical chunk metadata.
+
+**Techniques at this step.** [Validate persisted filer metadata across restart](#technique-metadata-restart-validation) · [Exercise inherited two-copy replication with controlled loss](#technique-replica-loss-and-restart).
+
+**Source.** [`coursework/verify.py:101`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L101) · [`coursework/verify.py:107`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L107) · [`coursework/verify.py:218`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L218). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-repair-blocked"></a>
+
+##### 7. Prove guarded repair remains blocked
+
+**Component.** Workbench.recovery. Starts a replacement volume and invokes shell replication repair. Requires loopback rejection text and unchanged degraded placement, and records repair.proved=false; successful repair is not demonstrated.
+
+**Techniques at this step.** [Attempt repair while preserving the endpoint guard](#technique-guarded-repair-attempt).
+
+**Source.** [`coursework/verify.py:232`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L232). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-outage"></a>
+
+##### 8. Check retained replicas and bounded outage
+
+**Component.** Workbench.recovery. Restarts retained volumes and rechecks bytes, then stops every volume and makes three-second read/write requests. Transport timeout on write is recorded unknown, never acknowledged.
+
+**Techniques at this step.** [Exercise inherited two-copy replication with controlled loss](#technique-replica-loss-and-restart).
+
+**Source.** [`coursework/verify.py:247`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L247). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-benchmark"></a>
+
+##### 9. Run native operation oracles
+
+**Component.** coursework.benchmark.trial and benchmark_support.load. Offers real PUT, GET, lifecycle or metadata/listing operations. GET/readback uses full-byte SHA-256, range requires exact bytes, and load classifies every offer including declines, rejection and timeout.
+
+**Techniques at this step.** [Separate offered load from verified operation outcomes](#technique-controlled-load-and-operation-oracles) · [Stream reads through a SHA-256 byte oracle](#technique-streaming-bytehash-oracle) · [Translate byte ranges into chunk reads](#technique-range-to-chunk-reads).
+
+**Source.** [`coursework/benchmark.py:59`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/benchmark.py#L59) · [`coursework/benchmark_support.py:97`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/benchmark_support.py#L97). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-cleanup"></a>
+
+##### 10. Clean owned processes and data
+
+**Component.** Workbench.finish and benchmark Run.cleanup. Finally stops owned processes, closes logs, removes only validated fresh run data when processes are reaped, and saves cleanup errors into the verdict. Benchmark sampler cleanup is separate; either cleanup failure fails the trial.
+
+**Techniques at this step.** [Own process handles and constrain destructive cleanup](#technique-owned-process-lifecycle).
+
+**Source.** [`coursework/verify.py:275`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L275) · [`coursework/verify.py:87`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/verify.py#L87) · [`coursework/benchmark.py:109`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/benchmark.py#L109) · [`coursework/benchmark_support.py:82`](https://github.com/STEVVVU/distributed-file-system/blob/master/coursework/benchmark_support.py#L82). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-http-write"></a>
+
+##### 11. Accept filer HTTP upload
+
+**Component.** FilerServer.filerHandler / PostHandler. PUT or multipart POST selects storage options, checks path restrictions, and enters autoChunk. The coursework filer sets maxMB=1 and replication=001. Configured in-flight limits wait before upload. Small inline files and unrelated API modes are outside this multi-chunk journey.
+
+**Techniques at this step.** [Chunk manifests map paths to volume chunks](#technique-chunk-manifest-addressing).
+
+**Source.** [`weed/server/filer_server_handlers.go:86`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/filer_server_handlers.go#L86). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-split"></a>
+
+##### 12. Split input into bounded chunks
+
+**Component.** FilerServer.uploadReaderToChunks. Reads bounded buffers, starts chunk upload goroutines under the buffer limit, and waits for every upload before sorting chunk records by offset. Any upload error deletes uncommitted chunks and returns failure.
+
+**Techniques at this step.** [Chunk manifests map paths to volume chunks](#technique-chunk-manifest-addressing).
+
+**Source.** [`weed/server/filer_server_handlers_write_upload.go:108`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/filer_server_handlers_write_upload.go#L108). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-assign"></a>
+
+##### 13. Assign chunk ID and volume target
+
+**Component.** FilerServer.assignNewFileInfo / MasterServer.Assign. Filer calls master Assign over gRPC. Master validates leader, placement and topology, then PickForWrite chooses a writable volume and file ID. Assignment may request volume growth or fail; filer receives the target URL and optional JWT.
+
+**Techniques at this step.** [Resolve chunk placement through master lookup](#technique-master-placement-lookup).
+
+**Source.** [`weed/server/filer_server_handlers_write.go:57`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/filer_server_handlers_write.go#L57) · [`weed/operation/assign_file_id.go:115`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/operation/assign_file_id.go#L115) · [`weed/server/master_grpc_server_assign.go:125`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/master_grpc_server_assign.go#L125). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-volume-upload"></a>
+
+##### 14. Upload chunk and validate request
+
+**Component.** FilerServer.dataToChunkWithSSE / VolumeServer.PostHandler. Each chunk obtains an assignment and uploads with a chunk MD5. Transient or reassignment errors retry with a new ID; failed attempts are tracked for deletion. Volume parses the needle, validates the request and calls ReplicatedWrite. The handler returns an error if replication fails.
+
+**Techniques at this step.** [Chunk manifests map paths to volume chunks](#technique-chunk-manifest-addressing).
+
+**Source.** [`weed/server/filer_server_handlers_write_upload.go:272`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/filer_server_handlers_write_upload.go#L272) · [`weed/server/volume_server_handlers_write.go:45`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/volume_server_handlers_write.go#L45). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-needle-store"></a>
+
+##### 15. Append needle and publish its index
+
+**Component.** storage.Volume.writeNeedle2. Store writes the needle into the volume data file, then publishes its ID-to-offset mapping. With fsync requested, sync or batch completion precedes acknowledgment and publication is ordered after data sync. The coursework restart experiment does not establish power-loss durability.
+
+**Techniques at this step.** [Exercise inherited two-copy replication with controlled loss](#technique-replica-loss-and-restart).
+
+**Source.** [`weed/storage/volume_write.go:245`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/storage/volume_write.go#L245) · [`weed/storage/volume_write.go:320`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/storage/volume_write.go#L320) · [`weed/storage/volume_write.go:339`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/storage/volume_write.go#L339) · [`weed/storage/needle/needle_write.go:13`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/storage/needle/needle_write.go#L13). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-replicate"></a>
+
+##### 16. Forward to replica locations and join
+
+**Component.** topology.ReplicatedWrite. After the local write, DistributedOperation sends HTTP uploads to remote replica locations with type=replicate. Forwarded requests suppress recursive fanout. A remote failure returns an error even if the local needle already exists; successful return allows the volume upload acknowledgment.
+
+**Techniques at this step.** [Exercise inherited two-copy replication with controlled loss](#technique-replica-loss-and-restart).
+
+**Source.** [`weed/topology/store_replicate.go:78`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/topology/store_replicate.go#L78). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-metadata-store"></a>
+
+##### 17. Publish the path and chunk records
+
+**Component.** FilerServer.saveMetaData / Filer.CreateEntry. After uploads complete and whole-request MD5 validation succeeds, saveMetaData attaches chunk IDs, offsets and sizes to the entry and calls CreateEntry. The configured default leveldb2 store encodes attributes and chunks under the path key. The filer returns 201 only after this call succeeds; bad digest or metadata failure removes uncommitted chunks.
+
+**Techniques at this step.** [Chunk manifests map paths to volume chunks](#technique-chunk-manifest-addressing) · [Validate persisted filer metadata across restart](#technique-metadata-restart-validation).
+
+**Source.** [`weed/server/filer_server_handlers_write_autochunk.go:530`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/filer_server_handlers_write_autochunk.go#L530) · [`weed/filer/filer.go:461`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/filer/filer.go#L461) · [`weed/filer/leveldb2/leveldb2_store.go:97`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/filer/leveldb2/leveldb2_store.go#L97). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-http-read"></a>
+
+##### 18. Load the entry for GET or HEAD
+
+**Component.** FilerServer.GetOrHeadHandler. FindEntry retrieves path metadata and chunk records. Missing paths return 404 and store failures return 500. Metadata requests return the entry; normal GET checks preconditions and dispatches range handling. HEAD returns headers without streaming chunks.
+
+**Techniques at this step.** [Chunk manifests map paths to volume chunks](#technique-chunk-manifest-addressing) · [Validate persisted filer metadata across restart](#technique-metadata-restart-validation).
+
+**Source.** [`weed/server/filer_server_handlers_read.go:98`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/filer_server_handlers_read.go#L98). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-range-plan"></a>
+
+##### 19. Validate range and prepare chunk views
+
+**Component.** ProcessRangeRequest / PrepareStreamContentWithPrefetch. The HTTP range parser selects the requested offset and length, or the whole file when Range is absent. Invalid ranges return 416. The filer derives visible chunk intervals and clips views to the selected bytes before looking up each chunk location.
+
+**Techniques at this step.** [Translate byte ranges into chunk reads](#technique-range-to-chunk-reads).
+
+**Source.** [`weed/server/filer_server_handlers_read.go:297`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/filer_server_handlers_read.go#L297) · [`weed/server/common.go:346`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/common.go#L346) · [`weed/filer/stream.go:295`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/filer/stream.go#L295). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-chunk-fetch"></a>
+
+##### 20. Resolve locations and fetch ordered chunks
+
+**Component.** filer.PrepareStreamContentWithPrefetch / streamChunksPrefetched. LookupFileId resolves each view through the master client volume-location cache, populated by the master KeepConnected stream. Lookup uses bounded backoff and context checks. Prefetch fetches volume HTTP chunks concurrently through pipes and consumes views in order; failure before bytes can invalidate stale locations and re-fetch.
+
+**Techniques at this step.** [Resolve chunk placement through master lookup](#technique-master-placement-lookup) · [Translate byte ranges into chunk reads](#technique-range-to-chunk-reads).
+
+**Source.** [`weed/filer/stream.go:310`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/filer/stream.go#L310) · [`weed/filer/stream_prefetch.go:105`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/filer/stream_prefetch.go#L105) · [`weed/filer/stream_prefetch.go:177`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/filer/stream_prefetch.go#L177) · [`weed/wdclient/vid_map.go:144`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/wdclient/vid_map.go#L144) · [`weed/wdclient/masterclient.go:377`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/wdclient/masterclient.go#L377) · [`weed/filer/filechunk_manifest.go:438`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/filer/filechunk_manifest.go#L438). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-needle-read"></a>
+
+##### 21. Read the indexed needle and check data
+
+**Component.** VolumeServer.GetOrHeadHandler / storage.Volume.readNeedle. The volume GET resolves the needle ID through its map and reads the corresponding data-file offset. Full data reads verify the needle CRC. Large streaming reads use the paged path; its CRC check applies to full reads, not arbitrary partial ranges. Missing, deleted or corrupt records fail the read.
+
+**Techniques at this step.** [Translate byte ranges into chunk reads](#technique-range-to-chunk-reads).
+
+**Source.** [`weed/storage/volume_read.go:34`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/storage/volume_read.go#L34) · [`weed/server/volume_server_handlers_read.go:194`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/volume_server_handlers_read.go#L194) · [`weed/storage/needle/needle_read_tail.go:11`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/storage/needle/needle_read_tail.go#L11) · [`weed/storage/volume_read.go:263`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/storage/volume_read.go#L263). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-http-result"></a>
+
+##### 22. Return complete bytes or partial content
+
+**Component.** ProcessRangeRequest. Streams prepared chunks to the HTTP response. A single valid Range returns 206 and Content-Range; a full GET returns the complete length. Stream errors discard buffered tails and abort an already-started response so incomplete content cannot appear complete.
+
+**Techniques at this step.** [Translate byte ranges into chunk reads](#technique-range-to-chunk-reads).
+
+**Source.** [`weed/server/common.go:385`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/common.go#L385). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-http-error"></a>
+
+##### 23. Return upload or preparation failure
+
+**Component.** FilerServer.autoChunk / ProcessRangeRequest. Upload failures map to the implemented HTTP error status, including 400 for bad digest and 500 for other upload or persistence errors. Range preparation errors return before content starts; failures after headers may terminate the response.
+
+**Techniques at this step.** [Chunk manifests map paths to volume chunks](#technique-chunk-manifest-addressing) · [Translate byte ranges into chunk reads](#technique-range-to-chunk-reads).
+
+**Source.** [`weed/server/filer_server_handlers_write_autochunk.go:49`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/server/filer_server_handlers_write_autochunk.go#L49). [Back to execution flow](#execution-flow).
+
+<a id="flow-step-volume-load"></a>
+
+##### 24. Reload volume files and needle map
+
+**Component.** storage.Volume.load. On volume startup, opens data and index files, rebuilds a missing local index when possible, checks local data integrity, and loads the needle map. Failed integrity or an index pointing beyond the data file makes the volume read-only. This local recovery is distinct from copying a lost replica.
+
+**Techniques at this step.** [Exercise inherited two-copy replication with controlled loss](#technique-replica-loss-and-restart).
+
+**Source.** [`weed/storage/volume_loading.go:257`](https://github.com/STEVVVU/distributed-file-system/blob/master/weed/storage/volume_loading.go#L257). [Back to execution flow](#execution-flow).
+
+<details>
+<summary>Scope and subsystem coverage</summary>
+
+Active filer HTTP multi-chunk upload, master assignment, replicated volume needle storage, filer metadata persistence, HTTP GET/range reads and local volume reload directly used by coursework. Verification, controlled loss/restart and guarded repair, and native benchmark remain separate workflows.
+
+- **File lifecycle and chunk manifest.** Upload, manifest, streaming full read, range, listing, overwrite and delete. [Step 2](#flow-step-upload), [Step 3](#flow-step-byte-range), [Step 4](#flow-step-mutations), [Step 11](#flow-step-http-write), [Step 12](#flow-step-split), [Step 14](#flow-step-volume-upload), [Step 17](#flow-step-metadata-store), [Step 18](#flow-step-http-read), [Step 19](#flow-step-range-plan), [Step 20](#flow-step-chunk-fetch), [Step 21](#flow-step-needle-read), [Step 22](#flow-step-http-result), [Step 23](#flow-step-http-error).
+- **Master placement and replication.** Lookup snapshots, controlled loss, survivor reads and restarts. [Step 5](#flow-step-loss), [Step 6](#flow-step-restart), [Step 8](#flow-step-outage), [Step 13](#flow-step-assign), [Step 16](#flow-step-replicate), [Step 15](#flow-step-needle-store), [Step 24](#flow-step-volume-load), [Step 20](#flow-step-chunk-fetch).
+- **Filer metadata persistence.** Requires chunk metadata equality across restart. [Step 6](#flow-step-restart), [Step 17](#flow-step-metadata-store), [Step 18](#flow-step-http-read).
+- **Workbench process and data lifecycle.** Owns processes and fresh run data; cleanup affects verdict. [Step 1](#flow-step-workbench), [Step 10](#flow-step-cleanup).
+- **Repair boundary.** Loopback rejection and unchanged degraded placement are required; no successful repair claim. [Step 7](#flow-step-repair-blocked).
+- **Native benchmark.** Native offered operations, exact byte/range oracles and cleanup. [Step 9](#flow-step-benchmark), [Step 10](#flow-step-cleanup).
+
+Outside this flow audit:
+
+- `weed/`. Unrelated upstream features, inactive commands, optional backends and deployment tooling are not exercised by these workflows.
+- `coursework/benchmark-full-39739708895.json`. Stored campaign outcome evidence, not an execution path.
+
+</details>
+
+<!-- execution-flow:end -->
+
+<details>
+<summary>Subsystem technique index</summary>
+
 ### Subsystem map
 
 Select a subsystem in the diagram to open its techniques, tradeoffs, and code references. The numbered links provide the same navigation. This map groups components; the execution diagrams show their runtime flow.
@@ -50,6 +535,8 @@ flowchart LR
 The complete upstream SeaweedFS application supplies the master, filer, volume servers, HTTP APIs, replication, and metadata persistence. The added coursework scope is a local real-process experiment driver and evidence format. The driver observes normal SeaweedFS APIs and process behavior; it does not add a replacement storage protocol or change replica repair policy.
 
 This boundary map shows the real process roles used by the workbench.
+
+</details>
 
 <details>
 <summary>Expand flow diagram 1</summary>
