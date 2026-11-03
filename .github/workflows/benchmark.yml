@@ -31,7 +31,7 @@ jobs:
       - run: python3 -m unittest discover -s coursework -p test_*.py -v
       - run: python3 coursework/benchmark.py smoke
       - run: python3 coursework/benchmark.py ${{ inputs.mode }}
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: storage-benchmark-${{ inputs.mode }}-${{ github.sha }}
